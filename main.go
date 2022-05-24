@@ -14,7 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const version = 162
+const version = 197
 const USAGE = `
 mcldsp
 
@@ -167,13 +167,14 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 	}
 
 	if err := copyRows(pgx, "channel_configs", struct {
-		Id                   sql.NullInt64 `db:"id"`
-		DustLimit            sql.NullInt64 `db:"dust_limit_satoshis"`
-		MaxHTLCValueInFlight sql.NullInt64 `db:"max_htlc_value_in_flight_msat"`
-		ChannelReserve       sql.NullInt64 `db:"channel_reserve_satoshis"`
-		HTLCMinimum          sql.NullInt64 `db:"htlc_minimum_msat"`
-		ToSelfDelay          sql.NullInt64 `db:"to_self_delay"`
-		MaxAcceptedHTLCs     sql.NullInt64 `db:"max_accepted_htlcs"`
+		Id                      sql.NullInt64 `db:"id"`
+		DustLimit               sql.NullInt64 `db:"dust_limit_satoshis"`
+		MaxHTLCValueInFlight    sql.NullInt64 `db:"max_htlc_value_in_flight_msat"`
+		ChannelReserve          sql.NullInt64 `db:"channel_reserve_satoshis"`
+		HTLCMinimum             sql.NullInt64 `db:"htlc_minimum_msat"`
+		ToSelfDelay             sql.NullInt64 `db:"to_self_delay"`
+		MaxAcceptedHTLCs        sql.NullInt64 `db:"max_accepted_htlcs"`
+		MaxDustHTLCExposureMsat sql.NullInt64 `db:"max_dust_htlc_exposure_msat"`
 	}{}, "id"); err != nil {
 		return
 	}
@@ -259,10 +260,24 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 		DelayedPaymentBasepointLocal  sqlblob        `db:"delayed_payment_basepoint_local"`
 		FundingPubkeyLocal            sqlblob        `db:"funding_pubkey_local"`
 		ShutdownWrongTxid             sqlblob        `db:"shutdown_wrong_txid"`
-		ShutdownWrongOutnum           int            `db:"shutdown_wrong_outnum"`
+		ShutdownWrongOutnum           sql.NullInt64  `db:"shutdown_wrong_outnum"`
 		LocalStaticRemotekeyStart     int64          `db:"local_static_remotekey_start"`
 		RemoteStaticRemotekeyStart    int64          `db:"remote_static_remotekey_start"`
+		LeaseCommitSig                sqlblob        `db:"lease_commit_sig"`
+		LeaseChanMaxMsat              sql.NullInt64  `db:"lease_chan_max_msat"`
+		LeaseChanMaxPpt               sql.NullInt64  `db:"lease_chan_max_ppt"`
+		LeaseExpiry                   int64          `db:"lease_expiry"`
+		HTLCMaximumMsat               int64          `db:"htlc_maximum_msat"`
+		HTLCMinimumMsat               int64          `db:"htlc_minimum_msat"`
 	}{}, "id"); err != nil {
+		return
+	}
+
+	if err := copyRows(pgx, "channel_blockheights", struct {
+		ChannelId   int64 `db:"channel_id"`
+		Hstate      int64 `db:"hstate"`
+		Blockheight int64 `db:"blockheight"`
+	}{}, "channel_id, hstate"); err != nil {
 		return
 	}
 
@@ -293,6 +308,11 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 		LocalFailMsg   sqlblob       `db:"localfailmsg"`
 		PartId         sql.NullInt64 `db:"partid"`
 		WeFilled       sql.NullInt64 `db:"we_filled"`
+		GroupId        sql.NullInt64 `db:"groupid"`
+		MinCommitNum   int64         `db:"min_commit_num"`
+		MaxCommitNum   sql.NullInt64 `db:"max_commit_num"`
+		FailImmediate  int64         `db:"fail_immediate"`
+		FeesMsat       int64         `db:"fees_msat"`
 	}{}, "id"); err != nil {
 		return
 	}
@@ -344,6 +364,7 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 		ScriptPubKey        sqlblob       `db:"scriptpubkey"`
 		ReservedTil         sql.NullInt64 `db:"reserved_til"`
 		OptionAnchorOutputs sql.NullInt64 `db:"option_anchor_outputs"`
+		CsvLock             int64         `db:"csv_lock"`
 	}{}, "prev_out_tx, prev_out_index"); err != nil {
 		return
 	}
@@ -374,7 +395,9 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 		TotalMsat       int64          `db:"total_msat"`
 		PartId          int64          `db:"partid"`
 		LocalOfferId    sqlblob        `db:"local_offer_id"`
-	}{}, "payment_hash, partid"); err != nil {
+		GroupId         int64          `db:"groupid"`
+		PayDescription  sql.NullString `db:"paydescription"`
+	}{}, "payment_hash, partid, groupid"); err != nil {
 		return
 	}
 
@@ -408,6 +431,7 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 		ReceivedTime   int64         `db:"received_time"`
 		ResolvedTime   sql.NullInt64 `db:"resolved_time"`
 		Failcode       sql.NullInt64 `db:"failcode"`
+		ForwardStyle   sql.NullInt64 `db:"forward_style"`
 	}{}, "in_htlc_id, out_htlc_id"); err != nil {
 		return
 	}
@@ -463,10 +487,10 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 	}
 
 	if err := copyRows(pgx, "offers", struct {
-		OfferId sqlblob `db:"offer_id"`
-		Bolt12  string  `db:"bolt12"`
-		Label   string  `db:"label"`
-		Status  int64   `db:"status"`
+		OfferId sqlblob        `db:"offer_id"`
+		Bolt12  string         `db:"bolt12"`
+		Label   sql.NullString `db:"label"`
+		Status  int64          `db:"status"`
 	}{}, "offer_id"); err != nil {
 		return
 	}
@@ -482,6 +506,12 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 		LastTx                      sqlblob `db:"last_tx"`
 		LastSig                     sqlblob `db:"last_sig"`
 		FundingTxRemoteSigsReceived int     `db:"funding_tx_remote_sigs_received"`
+		LeaseCommitSig              sqlblob `db:"lease_commit_sig"`
+		LeaseChanMaxMsat            int64   `db:"lease_chan_max_msat"`
+		LeaseChanMaxPpt             int64   `db:"lease_chan_max_ppt"`
+		LeaseExpiry                 int64   `db:"lease_expiry"`
+		LeaseBlockheightStart       int64   `db:"lease_blockheight_start"`
+		LeaseFee                    int64   `db:"lease_fee"`
 	}{}, "channel_id, funding_tx_id"); err != nil {
 		return
 	}
@@ -509,7 +539,7 @@ ON CONFLICT (name) DO UPDATE SET val=:val, intval=:intval, blobval=:blobval
 			if err := setSequence("invoices_id_seq"); err != nil {
 				return
 			}
-			if err := setSequence("payments_id_seq"); err != nil {
+			if err := setSequence("payments_id_seq1"); err != nil {
 				return
 			}
 			if err := setSequence("peers_id_seq"); err != nil {
